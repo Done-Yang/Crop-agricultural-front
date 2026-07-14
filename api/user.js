@@ -1,62 +1,61 @@
-// Mock user data
-export const mockUser = {
-  id: "usr_001",
-  email: "farmer@example.com",
-  name: "John Smith",
-  phoneNumber: "+1 234 567 8900",
-  location: "California, USA",
-  farmSize: "150 acres",
-  avatar: null,
-  preferences: {
-    notifications: true,
-    emailUpdates: true,
-    language: "en",
-  },
-  createdAt: "2024-01-15",
-};
+// Authentication + profile — real calls to the Light Backend /api/v1/auth/*.
+// The JWT is persisted by lib/api-client (localStorage) and attached to
+// authenticated requests automatically.
 
-// Mock authentication
-export async function login(email, password) {
-  // Simulate API delay
-  await new Promise((resolve) => setTimeout(resolve, 800));
+import { apiGet, apiPost, apiPatch, setToken, clearToken, ApiError } from "@/lib/api-client";
 
-  if (email === "demo@example.com" && password === "password") {
+// The login form collects an "email" field, the signup form a "phoneNumber"
+// field; the backend accepts either as the login identifier.
+export async function login(identifier, password) {
+  try {
+    const res = await apiPost("/api/v1/auth/login", { identifier, password });
+    setToken(res.token);
+    return { success: true, user: res.user, token: res.token };
+  } catch (err) {
     return {
-      success: true,
-      user: mockUser,
-      token: "mock_jwt_token_123",
+      success: false,
+      error:
+        err instanceof ApiError
+          ? err.message
+          : "ອີເມວ/ເບີໂທ ຫຼື ລະຫັດຜ່ານບໍ່ຖືກຕ້ອງ", // invalid credentials
     };
   }
-
-  return {
-    success: false,
-    error: "Invalid email or password",
-  };
 }
 
 export async function signup(data) {
-  await new Promise((resolve) => setTimeout(resolve, 800));
-
-  return {
-    success: true,
-    user: {
-      ...mockUser,
-      email: data.email,
+  try {
+    const res = await apiPost("/api/v1/auth/register", {
       name: data.name,
-    },
-    token: "mock_jwt_token_456",
-  };
+      password: data.password,
+      email: data.email,
+      phoneNumber: data.phoneNumber,
+    });
+    setToken(res.token);
+    return { success: true, user: res.user, token: res.token };
+  } catch (err) {
+    return {
+      success: false,
+      error: err instanceof ApiError ? err.message : "ການສະໝັກລົ້ມເຫຼວ",
+    };
+  }
 }
 
 export async function getProfile() {
-  await new Promise((resolve) => setTimeout(resolve, 500));
-  return mockUser;
+  return await apiGet("/api/v1/auth/me", { auth: true });
 }
 
 export async function updateProfile(updates) {
-  await new Promise((resolve) => setTimeout(resolve, 600));
-  return {
-    success: true,
-    user: { ...mockUser, ...updates },
-  };
+  try {
+    const res = await apiPatch("/api/v1/auth/me", updates, { auth: true });
+    return { success: true, user: res.user };
+  } catch (err) {
+    return {
+      success: false,
+      error: err instanceof ApiError ? err.message : "ບໍ່ສາມາດອັບເດດໂປຣໄຟລ໌ໄດ້",
+    };
+  }
+}
+
+export function logout() {
+  clearToken();
 }

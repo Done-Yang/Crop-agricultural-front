@@ -1,6 +1,8 @@
 "use client";
 
 import { createContext, useContext, useState, useEffect } from "react";
+import { getToken, clearToken } from "@/lib/api-client";
+import { getProfile } from "@/api/user";
 
 const AuthContext = createContext(null);
 
@@ -9,12 +11,49 @@ export function AuthProvider({ children }) {
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    // Check for existing session
-    const savedUser = localStorage.getItem("user");
-    if (savedUser) {
-      setUser(JSON.parse(savedUser));
+    let cancelled = false;
+
+    async function hydrate() {
+      const token = getToken();
+      const savedUser = localStorage.getItem("user");
+
+      // No token means no session, regardless of any stale cached user.
+      if (!token) {
+        clearToken();
+        localStorage.removeItem("user");
+        if (!cancelled) setIsLoading(false);
+        return;
+      }
+
+      // Optimistically show the cached user while we revalidate the token.
+      if (savedUser) {
+        try {
+          setUser(JSON.parse(savedUser));
+        } catch {
+          localStorage.removeItem("user");
+        }
+      }
+
+      try {
+        const fresh = await getProfile(); // validates the JWT server-side
+        if (!cancelled) {
+          setUser(fresh);
+          localStorage.setItem("user", JSON.stringify(fresh));
+        }
+      } catch {
+        // Expired / invalid token — drop the session.
+        clearToken();
+        localStorage.removeItem("user");
+        if (!cancelled) setUser(null);
+      } finally {
+        if (!cancelled) setIsLoading(false);
+      }
     }
-    setIsLoading(false);
+
+    hydrate();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const login = (userData) => {
@@ -24,6 +63,7 @@ export function AuthProvider({ children }) {
 
   const logout = () => {
     setUser(null);
+    clearToken();
     localStorage.removeItem("user");
   };
 

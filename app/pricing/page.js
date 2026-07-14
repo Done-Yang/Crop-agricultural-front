@@ -6,6 +6,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/context/auth-context";
 import { getPriceAnalysis, getPriceHistory, getMarketSummary } from "@/api/pricing";
+import { formatKip } from "@/lib/format";
 import {
   Loader2,
   TrendingUp,
@@ -80,11 +81,11 @@ function PriceCard({ item }) {
         <div className="grid grid-cols-2 gap-4 mb-4">
           <div>
             <p className="text-xs text-muted-foreground mb-1">ລາຄາຕະຫຼາດ</p>
-            <p className="text-xl font-bold text-foreground">${item.marketPrice.toFixed(2)}</p>
+            <p className="text-xl font-bold text-foreground">{formatKip(item.marketPrice)}</p>
           </div>
           <div>
             <p className="text-xs text-muted-foreground mb-1">ລາຄາຍຸຕິທຳ</p>
-            <p className="text-xl font-bold text-primary">${item.fairPrice.toFixed(2)}</p>
+            <p className="text-xl font-bold text-primary">{formatKip(item.fairPrice)}</p>
           </div>
         </div>
 
@@ -140,10 +141,10 @@ export default function PricingPage() {
   const { user, isLoading: authLoading } = useAuth();
   const router = useRouter();
   const [priceData, setPriceData] = useState([]);
-  const [historyData, setHistoryData] = useState([]);
+  const [historyData, setHistoryData] = useState({ weeks: [], products: [] });
   const [summary, setSummary] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
-  const [selectedProduct, setSelectedProduct] = useState("all");
+  const [selectedCategory, setSelectedCategory] = useState("all");
 
   useEffect(() => {
     if (!authLoading && !user) {
@@ -173,9 +174,24 @@ export default function PricingPage() {
     }
   }, [user, authLoading, router]);
 
-  const filteredData = selectedProduct === "all" 
-    ? priceData 
-    : priceData.filter(item => item.product.toLowerCase() === selectedProduct);
+  // Category filter options are derived from the real data (most-common first).
+  const categoryOptions = [
+    { key: "all", label: "ທັງໝົດ" },
+    ...Array.from(
+      priceData.reduce((m, item) => {
+        const c = item.category;
+        if (c) m.set(c, (m.get(c) || 0) + 1);
+        return m;
+      }, new Map())
+    )
+      .sort((a, b) => b[1] - a[1])
+      .map(([label]) => ({ key: label, label })),
+  ];
+
+  const filteredData =
+    selectedCategory === "all"
+      ? priceData
+      : priceData.filter((item) => item.category === selectedCategory);
 
   if (authLoading || isLoading) {
     return (
@@ -247,33 +263,26 @@ export default function PricingPage() {
               <div>
                 <h3 className="font-semibold text-foreground">ຂໍ້ມູນເຈາະເລິກຕະຫຼາດ</h3>
                 <p className="text-sm text-muted-foreground mt-1">
-                  ໝາກເລັ່ນ ແລະ ຜັກສະຫຼັດ ສະແດງສັນຍານຄວາມຕ້ອງການທີ່ສູງ. ພິຈາລະນາໃຫ້ບູລິມະສິດກັບພືດເຫຼົ່ານີ້ເພື່ອຜົນຕອບແທນສູງສຸດ.
-                  ອຸປະທານເຂົ້າສາລີເກີນກວ່າຄວາມຕ້ອງການ - ຄາດວ່າຄວາມກົດດັນດ້ານລາຄາຈະຍັງສືບຕໍ່.
+                  ມີ {summary?.understockedItems ?? 0} ຜະລິດຕະພັນທີ່ຄວາມຕ້ອງການສູງກວ່າອຸປະທານ (ລາຄາຕ່ຳກວ່າຍຸຕິທຳ) —
+                  ເປັນໂອກາດຕັ້ງລາຄາສູງຂຶ້ນ. ອີກ {summary?.overstockedItems ?? 0} ຜະລິດຕະພັນມີອຸປະທານເກີນ —
+                  ຄວນຂາຍໄວ ຫຼື ເກັບຮັກສາໄວ້ເພື່ອຫຼີກລ່ຽງຄວາມກົດດັນດ້ານລາຄາ.
                 </p>
               </div>
             </div>
           </CardContent>
         </Card>
 
-        {/* Product Filter */}
+        {/* Category Filter (derived from live data) */}
         <div className="flex gap-2 overflow-x-auto pb-2 -mx-4 px-4 md:mx-0 md:px-0">
-          {[
-            { key: "all", label: "ທັງໝົດ" },
-            { key: "tomatoes", label: "ໝາກເລັ່ນ" },
-            { key: "corn", label: "ສາລີ" },
-            { key: "soybeans", label: "ຖົ່ວເຫຼືອງ" },
-            { key: "lettuce", label: "ຜັກສະຫຼັດ" },
-            { key: "wheat", label: "ເຂົ້າສາລີ" },
-            { key: "potatoes", label: "ມັນຝະລັ່ງ" },
-          ].map((product) => (
+          {categoryOptions.map((cat) => (
             <Button
-              key={product.key}
-              variant={selectedProduct === product.key ? "default" : "outline"}
+              key={cat.key}
+              variant={selectedCategory === cat.key ? "default" : "outline"}
               size="sm"
-              onClick={() => setSelectedProduct(product.key)}
+              onClick={() => setSelectedCategory(cat.key)}
               className="whitespace-nowrap"
             >
-              {product.label}
+              {cat.label}
             </Button>
           ))}
         </div>
@@ -287,51 +296,35 @@ export default function PricingPage() {
           <CardContent>
             <div className="h-64 md:h-80">
               <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={historyData}>
+                <LineChart data={historyData.weeks}>
                   <CartesianGrid strokeDasharray="3 3" className="stroke-border" />
                   <XAxis dataKey="week" className="text-xs" tick={{ fill: "var(--muted-foreground)" }} />
-                  <YAxis className="text-xs" tick={{ fill: "var(--muted-foreground)" }} />
+                  <YAxis
+                    className="text-xs"
+                    tick={{ fill: "var(--muted-foreground)" }}
+                    width={70}
+                    tickFormatter={(v) => formatKip(v)}
+                  />
                   <Tooltip
                     contentStyle={{
                       backgroundColor: "var(--background)",
                       border: "1px solid var(--border)",
                       borderRadius: "8px",
                     }}
-                    formatter={(value) => [`$${value.toFixed(2)}`, ""]}
+                    formatter={(value) => [formatKip(value), ""]}
                   />
                   <Legend />
-                  <Line
-                    type="monotone"
-                    dataKey="tomatoes"
-                    stroke="var(--trend-down)"
-                    strokeWidth={2}
-                    dot={false}
-                    name="ໝາກເລັ່ນ"
-                  />
-                  <Line
-                    type="monotone"
-                    dataKey="corn"
-                    stroke="var(--primary)"
-                    strokeWidth={2}
-                    dot={false}
-                    name="ສາລີ"
-                  />
-                  <Line
-                    type="monotone"
-                    dataKey="soybeans"
-                    stroke="var(--trend-up)"
-                    strokeWidth={2}
-                    dot={false}
-                    name="ຖົ່ວເຫຼືອງ"
-                  />
-                  <Line
-                    type="monotone"
-                    dataKey="lettuce"
-                    stroke="var(--chart-4)"
-                    strokeWidth={2}
-                    dot={false}
-                    name="ຜັກສະຫຼັດ"
-                  />
+                  {historyData.products.map((product) => (
+                    <Line
+                      key={product.key}
+                      type="monotone"
+                      dataKey={product.key}
+                      stroke={product.color}
+                      strokeWidth={2}
+                      dot={false}
+                      name={product.name}
+                    />
+                  ))}
                 </LineChart>
               </ResponsiveContainer>
             </div>

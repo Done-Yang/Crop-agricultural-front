@@ -112,7 +112,7 @@ export default function ForecastPage() {
   const router = useRouter();
   const [forecastData, setForecastData] = useState([]);
   const [recommendations, setRecommendations] = useState([]);
-  const [seasonalData, setSeasonalData] = useState([]);
+  const [seasonalData, setSeasonalData] = useState({ seasons: [], categories: [] });
   const [isLoading, setIsLoading] = useState(true);
   const [activeTab, setActiveTab] = useState("trends");
 
@@ -151,6 +151,19 @@ export default function ForecastPage() {
       </div>
     );
   }
+
+  // Derive peak / low demand months from the real series (demand where the
+  // forecast exists, otherwise historical supply).
+  const metricOf = (d) => (d.demand > 0 ? d.demand : d.supply || 0);
+  const withMetric = forecastData.filter((d) => metricOf(d) > 0);
+  const peakPoint = withMetric.reduce(
+    (max, d) => (metricOf(d) > metricOf(max) ? d : max),
+    withMetric[0] || null
+  );
+  const lowPoint = withMetric.reduce(
+    (min, d) => (metricOf(d) < metricOf(min) ? d : min),
+    withMetric[0] || null
+  );
 
   return (
     <MainLayout
@@ -197,30 +210,34 @@ export default function ForecastPage() {
               <Card>
                 <CardContent className="p-4">
                   <p className="text-sm text-muted-foreground">ພາບລວມຄວາມຕ້ອງການ</p>
-                  <p className="text-2xl font-bold text-foreground">ກໍລະກົດ</p>
+                  <p className="text-2xl font-bold text-foreground">{peakPoint?.month || "N/A"}</p>
                   <div className="flex items-center gap-1 mt-1">
                     <TrendingUp className="w-4 h-4 text-trend-up" />
-                    <span className="text-sm text-trend-up">7,800 ໜ່ວຍ</span>
+                    <span className="text-sm text-trend-up">
+                      {(peakPoint ? metricOf(peakPoint) : 0).toLocaleString()} ໜ່ວຍ
+                    </span>
                   </div>
                 </CardContent>
               </Card>
               <Card>
                 <CardContent className="p-4">
                   <p className="text-sm text-muted-foreground">ລະດູຕ່ຳ</p>
-                  <p className="text-2xl font-bold text-foreground">ມັງກອນ</p>
+                  <p className="text-2xl font-bold text-foreground">{lowPoint?.month || "N/A"}</p>
                   <div className="flex items-center gap-1 mt-1">
                     <TrendingDown className="w-4 h-4 text-trend-down" />
-                    <span className="text-sm text-trend-down">4,200 ໜ່ວຍ</span>
+                    <span className="text-sm text-trend-down">
+                      {(lowPoint ? metricOf(lowPoint) : 0).toLocaleString()} ໜ່ວຍ
+                    </span>
                   </div>
                 </CardContent>
               </Card>
               <Card>
                 <CardContent className="p-4">
-                  <p className="text-sm text-muted-foreground">ການເຕີບໂຕສະເລ່ຍ</p>
-                  <p className="text-2xl font-bold text-foreground">+12.5%</p>
+                  <p className="text-sm text-muted-foreground">ໄລຍະພະຍາກອນ</p>
+                  <p className="text-2xl font-bold text-foreground">{forecastData.length} ເດືອນ</p>
                   <div className="flex items-center gap-1 mt-1">
-                    <TrendingUp className="w-4 h-4 text-trend-up" />
-                    <span className="text-sm text-trend-up">ທຽບກັບປີກ່ອນ</span>
+                    <BarChart3 className="w-4 h-4 text-primary" />
+                    <span className="text-sm text-primary">ອີງຕາມຂໍ້ມູນຕົວຈິງ</span>
                   </div>
                 </CardContent>
               </Card>
@@ -288,7 +305,7 @@ export default function ForecastPage() {
               <CardContent>
                 <div className="h-64 md:h-72">
                   <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={seasonalData}>
+                    <BarChart data={seasonalData.seasons}>
                       <CartesianGrid strokeDasharray="3 3" className="stroke-border" />
                       <XAxis dataKey="season" className="text-xs" tick={{ fill: "var(--muted-foreground)" }} />
                       <YAxis className="text-xs" tick={{ fill: "var(--muted-foreground)" }} />
@@ -300,9 +317,15 @@ export default function ForecastPage() {
                         }}
                       />
                       <Legend />
-                      <Bar dataKey="vegetables" fill="var(--trend-up)" name="ຜັກ" radius={[4, 4, 0, 0]} />
-                      <Bar dataKey="fruits" fill="var(--primary)" name="ໝາກໄມ້" radius={[4, 4, 0, 0]} />
-                      <Bar dataKey="grains" fill="var(--chart-4)" name="ທັນຍະພືດ" radius={[4, 4, 0, 0]} />
+                      {seasonalData.categories.map((cat) => (
+                        <Bar
+                          key={cat.key}
+                          dataKey={cat.key}
+                          fill={cat.color}
+                          name={cat.name}
+                          radius={[4, 4, 0, 0]}
+                        />
+                      ))}
                     </BarChart>
                   </ResponsiveContainer>
                 </div>

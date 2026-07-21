@@ -1,11 +1,17 @@
 import type { Metadata, Viewport } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import { Geist, Geist_Mono, Noto_Sans_Lao } from "next/font/google";
 import { Analytics } from "@vercel/analytics/next";
 import { AuthProvider } from "@/context/auth-context";
 import "./globals.css";
 
-const _geist = Geist({ subsets: ["latin"], variable: "--font-geist" });
-const _geistMono = Geist_Mono({ subsets: ["latin"], variable: "--font-geist-mono" });
+const geist = Geist({ subsets: ["latin"], variable: "--font-geist" });
+const geistMono = Geist_Mono({ subsets: ["latin"], variable: "--font-geist-mono" });
+const notoSansLao = Noto_Sans_Lao({
+  subsets: ["lao"],
+  weight: ["400", "500", "600", "700"],
+  variable: "--font-noto-sans-lao",
+  display: "swap",
+});
 
 export const metadata: Metadata = {
   title: "AgriPrice - Agricultural Market Forecasting",
@@ -47,7 +53,10 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className="bg-background">
+    <html
+      lang="en"
+      className={`bg-background ${geist.variable} ${geistMono.variable} ${notoSansLao.variable}`}
+    >
       <body className="font-sans antialiased">
         <AuthProvider>{children}</AuthProvider>
         {process.env.NODE_ENV === "production" && <Analytics />}

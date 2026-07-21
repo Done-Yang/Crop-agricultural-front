@@ -21,7 +21,47 @@ import {
   ArrowDownRight,
 } from "lucide-react";
 import MainLayout from "@/components/mainLayout";
-import { LineChart, Line, ResponsiveContainer, Tooltip } from "recharts";
+import { LineChart, Line, ResponsiveContainer, Tooltip, XAxis } from "recharts";
+import { formatNumber, formatQuantity, BAND_META, MIXED_UNIT_LABEL } from "@/lib/format";
+import { MonthDayTick } from "@/components/chart-axis";
+
+// Names the date duration each monthly point covers, plus how much confidence
+// it carries (observed / model-backed / extrapolated).
+function DemandTooltip({ active, payload }) {
+  if (!active || !payload?.length) return null;
+  const point = payload[0]?.payload;
+  if (!point) return null;
+  const band = BAND_META[point.band] ?? BAND_META.forecast;
+  const demand = point.demand ?? point.demandProjected;
+
+  return (
+    <div className="rounded-lg border border-border bg-background p-3 shadow-md">
+      <p className="font-semibold text-foreground">
+        {point.month} {point.year}
+      </p>
+      {point.rangeLabel && (
+        <p className="text-xs text-muted-foreground">
+          {point.rangeLabel} ({point.days} ວັນ)
+        </p>
+      )}
+      <p className="mt-1 text-xs text-muted-foreground">{band.label} — {band.hint}</p>
+      {/* Totals span products sold in different units, so they are labelled as
+          a mixed total rather than borrowing any one product's unit. */}
+      <div className="mt-2 space-y-1 text-sm">
+        {demand > 0 && (
+          <p className="text-primary">
+            ຄວາມຕ້ອງການ: {formatQuantity(demand, MIXED_UNIT_LABEL)}
+          </p>
+        )}
+        {point.supply > 0 && (
+          <p className="text-trend-up">
+            ການບໍລິໂພກຕົວຈິງ: {formatQuantity(point.supply, MIXED_UNIT_LABEL)}
+          </p>
+        )}
+      </div>
+    </div>
+  );
+}
 
 function QuickStatCard({ title, value, change, trend, icon: Icon }) {
   return (
@@ -56,14 +96,21 @@ function QuickStatCard({ title, value, change, trend, icon: Icon }) {
 function TopCropCard({ crop, rank }) {
   return (
     <div className="flex items-center gap-3 p-3 bg-muted/50 rounded-xl">
-      <div className="w-8 h-8 rounded-full bg-primary text-primary-foreground flex items-center justify-center text-sm font-bold">
+      <div className="w-8 h-8 shrink-0 rounded-full bg-primary text-primary-foreground flex items-center justify-center text-sm font-bold">
         {rank}
       </div>
-      <div className="flex-1">
-        <p className="font-medium text-foreground">{crop.crop}</p>
-        <p className="text-xs text-muted-foreground">{crop.season}</p>
+      <div className="min-w-0 flex-1">
+        <p className="truncate font-medium text-foreground">{crop.crop}</p>
+        <p className="text-xs text-muted-foreground">
+          {crop.season}
+          {crop.seasonDuration ? ` · ${crop.seasonDuration}` : ""}
+        </p>
+        <p className="text-xs text-muted-foreground">
+          {formatQuantity(crop.expectedDemand, crop.unit)}
+          {crop.peakMonthName ? ` · ສູງສຸດ ${crop.peakMonthName}` : ""}
+        </p>
       </div>
-      <div className="text-right">
+      <div className="shrink-0 text-right">
         <p className="text-sm font-bold text-primary">{crop.recommendationScore}%</p>
         <p className="text-xs text-muted-foreground">ຄວາມເໝາະສົມ</p>
       </div>
@@ -113,7 +160,7 @@ export default function DashboardPage() {
       try {
         const [forecast, crops, prices, marketSummary] = await Promise.all([
           getDemandForecast(),
-          getCropRecommendations(),
+          getCropRecommendations(10),
           getPriceAnalysis(),
           getMarketSummary(),
         ]);
@@ -141,7 +188,20 @@ export default function DashboardPage() {
     );
   }
 
-  const peakMonth = forecastData.reduce((max, item) => (item.demand > max.demand ? item : max), forecastData[0]);
+  // `demand` is null on extrapolated months (they carry `demandProjected`
+  // instead), so fall back through both before using historical supply.
+  const metricOf = (d) => (d.demand ?? d.demandProjected ?? 0) || d.supply || 0;
+  const withMetric = forecastData.filter((d) => metricOf(d) > 0);
+  const peakMonth = withMetric.reduce(
+    (max, item) => (metricOf(item) > metricOf(max) ? item : max),
+    withMetric[0] || null
+  );
+  const spanLabel =
+    forecastData.length > 0
+      ? `${forecastData[0].month} ${forecastData[0].year} - ${
+          forecastData[forecastData.length - 1].month
+        } ${forecastData[forecastData.length - 1].year}`
+      : "-";
 
   return (
     <MainLayout title="ລະບົບຊ່ວຍເຫຼືອການກະສິກຳ">
@@ -149,9 +209,13 @@ export default function DashboardPage() {
         {/* Quick Stats */}
         <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
           <QuickStatCard
-            title="ຄວາມຕ້ອງການ"
-            value={peakMonth?.month || "N/A"}
-            change="+12.5%"
+            title={
+              peakMonth?.rangeLabel
+                ? `ຄວາມຕ້ອງການສູງສຸດ · ${peakMonth.rangeLabel}`
+                : "ຄວາມຕ້ອງການສູງສຸດ"
+            }
+            value={peakMonth ? `${peakMonth.month} ${peakMonth.year}` : "N/A"}
+            change={`${formatNumber(peakMonth ? metricOf(peakMonth) : 0)} ${MIXED_UNIT_LABEL}`}
             trend="up"
             icon={TrendingUp}
           />
@@ -182,25 +246,43 @@ export default function DashboardPage() {
         <Card>
           <CardHeader className="pb-2">
             <div className="flex items-center justify-between">
-              <CardTitle className="text-lg">ແນວໂນ້ມຄວາມຕ້ອງການ</CardTitle>
-              {/* <Link href="/forecast">
+              <div>
+                <CardTitle className="text-lg">ແນວໂນ້ມຄວາມຕ້ອງການ</CardTitle>
+                {/* The span the chart covers, so the axis is never read as
+                    "the last N months" of something unspecified. */}
+                <p className="text-sm text-muted-foreground">
+                  {spanLabel} ({forecastData.length} ເດືອນ)
+                </p>
+              </div>
+              <Link href="/forecast">
                 <Button variant="ghost" size="sm" className="text-primary">
                   ເບິ່ງທັງໝົດ
                   <ChevronRight className="w-4 h-4 ml-1" />
                 </Button>
-              </Link> */}
+              </Link>
             </div>
           </CardHeader>
           <CardContent>
-            <div className="h-40">
+            <div className="h-44">
               <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={forecastData}>
-                  <Tooltip
-                    contentStyle={{
-                      backgroundColor: "var(--background)",
-                      border: "1px solid var(--border)",
-                      borderRadius: "8px",
-                    }}
+                <LineChart data={forecastData} margin={{ bottom: 12 }}>
+                  {/* Two-line tick: month + the day numbers it covers. */}
+                  <XAxis
+                    dataKey="label"
+                    className="text-xs"
+                    tick={<MonthDayTick data={forecastData} />}
+                    height={38}
+                    interval="preserveStartEnd"
+                    minTickGap={16}
+                  />
+                  <Tooltip content={<DemandTooltip />} />
+                  <Line
+                    type="monotone"
+                    dataKey="supply"
+                    stroke="var(--trend-up)"
+                    strokeWidth={2}
+                    dot={false}
+                    connectNulls
                   />
                   <Line
                     type="monotone"
@@ -208,25 +290,35 @@ export default function DashboardPage() {
                     stroke="var(--primary)"
                     strokeWidth={2}
                     dot={false}
+                    connectNulls
                   />
+                  {/* Extrapolated tail — dashed so it never reads as equally
+                      confident as the model-backed segment. */}
                   <Line
                     type="monotone"
-                    dataKey="supply"
-                    stroke="var(--trend-up)"
+                    dataKey="demandProjected"
+                    stroke="var(--primary)"
                     strokeWidth={2}
+                    strokeDasharray="5 4"
+                    strokeOpacity={0.65}
                     dot={false}
+                    connectNulls
                   />
                 </LineChart>
               </ResponsiveContainer>
             </div>
-            <div className="flex items-center justify-center gap-6 mt-2">
+            <div className="mt-2 flex flex-wrap items-center justify-center gap-x-6 gap-y-1">
+              <div className="flex items-center gap-2">
+                <div className="w-3 h-3 rounded-full bg-trend-up" />
+                <span className="text-sm text-muted-foreground">ການບໍລິໂພກຕົວຈິງ</span>
+              </div>
               <div className="flex items-center gap-2">
                 <div className="w-3 h-3 rounded-full bg-primary" />
                 <span className="text-sm text-muted-foreground">ຄວາມຕ້ອງການທີ່ພະຍາກອນ</span>
               </div>
               <div className="flex items-center gap-2">
-                <div className="w-3 h-3 rounded-full bg-trend-up" />
-                <span className="text-sm text-muted-foreground">ຈຳນວນການບໍລິໂພກທີ່ຜ່ານມາ</span>
+                <div className="h-0 w-4 border-t-2 border-dashed border-primary/70" />
+                <span className="text-sm text-muted-foreground">{BAND_META.projected.label}</span>
               </div>
             </div>
           </CardContent>
@@ -239,16 +331,16 @@ export default function DashboardPage() {
             <CardHeader className="pb-2">
               <div className="flex items-center justify-between">
                 <CardTitle className="text-lg">ຄຳແນະນຳອັນດັບຕົ້ນ</CardTitle>
-                {/* <Link href="/forecast">
+                <Link href="/forecast">
                   <Button variant="ghost" size="sm" className="text-primary">
                     ເບິ່ງທັງໝົດ
                     <ChevronRight className="w-4 h-4 ml-1" />
                   </Button>
-                </Link> */}
+                </Link>
               </div>
             </CardHeader>
-            <CardContent className="space-y-3">
-              {recommendations.slice(0, 3).map((crop, index) => (
+            <CardContent className="grid gap-3 md:grid-cols-2">
+              {recommendations.slice(0, 10).map((crop, index) => (
                 <TopCropCard key={crop.id} crop={crop} rank={index + 1} />
               ))}
             </CardContent>
